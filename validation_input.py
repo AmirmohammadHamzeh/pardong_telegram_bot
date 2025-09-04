@@ -13,7 +13,7 @@ def validate_english_username(fallback_stage):
                 return await func(update, context)
             else:
                 await update.message.reply_text(
-                    "❌ ورودی فقط باید شامل حروف انگلیسی باشد (بدون عدد یا علامت). لطفاً دوباره وارد کنید:"
+                    "❌ ورودی فقط باید شامل حروف انگلیسی باشه (بدون عدد یا علامت). لطفاً دوباره وارد کن:"
                 )
                 return fallback_stage
 
@@ -31,7 +31,7 @@ def validate_numeric_input(fallback_stage):
                 return await func(update, context)
             else:
                 await update.message.reply_text(
-                    "❌ ورودی فقط باید شامل ارقام باشد. لطفاً یک عدد وارد کنید:")
+                    "❌ ورودی فقط باید شامل ارقام باشه. لطفاً یک عدد وارد کن:")
                 return fallback_stage
 
         return wrapper
