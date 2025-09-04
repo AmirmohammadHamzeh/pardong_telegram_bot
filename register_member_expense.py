@@ -1,144 +1,155 @@
 import requests
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    Application, CommandHandler, MessageHandler, filters,
-    CallbackContext, ConversationHandler, ContextTypes
+    ContextTypes, ConversationHandler, CommandHandler, MessageHandler,
+    CallbackQueryHandler, filters,
 )
-from get_user_token import get_user_token
-from config import API_BASE_URL
-from get_user_data import get_user_data
-import json
+from config import API_BASE_URL, DB_NUM_CACHE_GROUP_ID, DB_NUM_CACHE_EXPENSE_ID
+from cancel_conversation import cancel
+from cache_data import RedisManager
+from make_request import api_request
 
-API_GET_GROUP_URL = f"{API_BASE_URL}/group/get_group"
-API_REGISTER_URL = f"{API_BASE_URL}/expense/add_participants"
-GROUP_NAME_ADD_MEMBER_EXPENSE, SELECT_MEMBER, AMOUNT, EXPENSE_ID = range(4)
+GROUP_ID, SELECT_MEMBER, AMOUNT, EXPENSE_ID = range(4)
+API_GET_GROUP_INFO = "/group/get_group/"
+API_REGISTER_URL = "/expense/add_participants/"
+cache_expense_id = RedisManager(db=DB_NUM_CACHE_EXPENSE_ID)
+cache_group_id = RedisManager(db=DB_NUM_CACHE_GROUP_ID)
 
 
-async def start_add_members_expense(update: Update, context: CallbackContext):
+async def start_add_member_expense(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
-    token = await get_user_token(user_id)
+    get_cached_data = cache_group_id.get_dict(user_id)
+    keyboard = [
+        [InlineKeyboardButton(text=key, callback_data=value)]
+        for key, value in get_cached_data.items()
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.effective_message.reply_text("گروهی که میخوای توش دونگ ثبت کنی انتخاب کن: ", reply_markup=reply_markup)
+    return GROUP_ID
 
-    if not token:
-        await update.message.reply_text("❌ شما لاگین نکرده‌اید. ابتدا لاگین کنید.")
+
+async def get_group_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    button_text = None
+    for row in query.message.reply_markup.inline_keyboard:
+        for button in row:
+            if button.callback_data == query.data:
+                button_text = button.text
+                break
+    await query.message.delete()
+    group_id = query.data
+    context.user_data["group_id"] = group_id
+    result = await api_request("GET", f"{API_GET_GROUP_INFO}{group_id}")
+    if result is None:
+        await update.effective_message.reply_text("❌ ارتباط با سرور برقرار نشد.")
         return ConversationHandler.END
 
-    await update.message.reply_text("لطفا شناسه گروه خود را وارد کنید")
-    return GROUP_NAME_ADD_MEMBER_EXPENSE
+    status_code, response = result
 
-
-async def get_groupname_add_member_expense(update: Update, context: CallbackContext):
-    group_id = update.message.text
-    user_id = update.message.from_user.id
-    token = await get_user_token(user_id)
-    if not token:
-        await update.message.reply_text("❌ شما لاگین نکرده‌اید.")
-        return ConversationHandler.END
-    headers = {"Authorization": f"Bearer {token}"}
-    response = requests.get(f"{API_GET_GROUP_URL}/{group_id}", headers=headers)
-    # TODO make output better
-    if response.status_code == 200:
-        members = response.json()["data"]["members"]
+    if status_code == 200:
+        members = response["data"]["members"]
         if not members:
-            await update.message.reply_text("⚠️ هیچ عضوی در این گروه یافت نشد.")
+            await query.message.reply_text("⚠️ هیچ عضوی توی این گروه نیست. که بخوای براش دونگ ثبت کنی")
             return ConversationHandler.END
-        else:
-            # ایجاد دیکشنری مورد نظر
-            formatted_members = {
-                m["username"]: {
-                    "user_id": m["user_id"],
-                    "username": m["username"]
-                }
-                for m in members
-            }
-            context.user_data["members"] = formatted_members
 
-            keyboard = [[InlineKeyboardButton(key, callback_data=key)] for key in formatted_members.keys()]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            await update.message.reply_text("👥 لطفاً یکی از اعضا را انتخاب کنید:", reply_markup=reply_markup)
+        keyboard = [
+            [InlineKeyboardButton(m["username"], callback_data=m["username"])]
+            for m in members if m["username"]
+        ]
+        context.user_data["members"] = {
+            m["username"]: {"user_id": m["user_id"], "username": m["username"]}
+            for m in members if m["username"]
+        }
 
-            return SELECT_MEMBER  # انتقال به مرحله بعد
+        await query.message.reply_text(f"""
+        {button_text}
+        👥 برای کی میخوای دونگ ثبت کنی؟
+        """,
+                                       reply_markup=InlineKeyboardMarkup(keyboard)
+                                       )
+        return SELECT_MEMBER
 
     else:
-        await update.message.reply_text(f"❌ خطا در دریافت اعضا: {response.json().get('detail', 'نامشخص')}")
+        await query.message.reply_text("❌ خطا در دریافت اعضای گروه.")
         return ConversationHandler.END
 
 
-async def member_button_callback_add_member_expense(update: Update, context: CallbackContext):
+async def member_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    selected_member = query.data
-
-    if "members" in context.user_data and selected_member in context.user_data["members"]:
-        member_info = context.user_data["members"][selected_member]
-        context.user_data["selected_member_info"] = member_info
-        await query.message.edit_text(f"عضو {selected_member} انتخاب شد.\nمبلغ را وارد کنید:")
-        return AMOUNT
-
-    else:
-        await query.message.reply_text("❌ اطلاعات این کاربر یافت نشد.")
-
-    return ConversationHandler.END
-
-
-async def get_amount_add_member_expense(update: Update, context: CallbackContext):
-    amount = update.message.text
-    context.user_data["amount"] = amount
-    member_info = context.user_data.get("selected_member_info")
-    if member_info:
-        await update.message.reply_text(
-            f"اطلاعات عضو انتخاب ‌شده:\n"
-            f"🆔 user_id: {member_info['user_id']}\n"
-            f"👤 username: {member_info['username']}\n💰 مبلغ: {amount}\n"
-            "حالا آيدی اکسپنس مورد نظر رو بفرست:"
-        )
-        return EXPENSE_ID
-    else:
-        await update.message.reply_text("❌ اطلاعاتی پیدا نشد.")
-
-    return ConversationHandler.END
-
-
-async def get_member_add_member_expense(update: Update, context: CallbackContext):
-    expense_id = update.message.text
-    context.user_data["expense_id"] = expense_id
-    user_id = update.message.from_user.id
-    token = await get_user_token(user_id)
-
-    if not token:
-        await update.message.reply_text("❌ شما لاگین نکرده‌اید.")
+    username = query.data
+    member_info = context.user_data["members"].get(username)
+    if not member_info:
+        await query.message.reply_text("❌ عضو یافت نشد.")
         return ConversationHandler.END
 
-    selected_member_info = context.user_data.get("selected_member_info")
-    username_selected_member = selected_member_info["username"]
-    user_id_selected_member = selected_member_info["user_id"]
-    share = context.user_data.get("amount")
+    context.user_data["selected_member"] = member_info
+    await query.message.edit_text(f"✅ عضو {username} انتخاب شد. حالا لطفاً مبلغ دونگ رو وارد کن:")
+    return AMOUNT
+
+
+async def get_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    amount = update.message.text.strip()
+    if not amount.isdigit():
+        await update.effective_message.reply_text("❌ورودی نامعتبر لطفا مبلغ دونگ رو به صورت عددی وارد کن")
+        return AMOUNT
+    context.user_data["amount"] = amount
+    get_cached_data = cache_expense_id.get_dict(context.user_data["group_id"])
+    keyboard = [
+        [InlineKeyboardButton(text=key, callback_data=value)]
+        for key, value in get_cached_data.items()
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.effective_message.reply_text("برای کدوم خرید میخوای دونگ ثبت کنی؟", reply_markup=reply_markup)
+    return EXPENSE_ID
+
+
+async def get_expense_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    await query.message.delete()
+    expense_id = query.data
+    context.user_data["expense_id"] = expense_id
+
+    selected = context.user_data["selected_member"]
 
     data = {
-        "user_id": user_id_selected_member,
-        "username": username_selected_member,
-        "share": share,
+        "user_id": selected["user_id"],
+        "username": selected["username"],
+        "share": context.user_data["amount"],
     }
+    result = await api_request("PATCH", f"{API_REGISTER_URL}{expense_id}",data=data)
+    if result is None:
+        await update.effective_message.reply_text("❌ ارتباط با سرور برقرار نشد.")
+        return ConversationHandler.END
 
-    headers = {"Authorization": f"Bearer {token}"}
-    response = requests.patch(f"{API_REGISTER_URL}/{expense_id}", json=data, headers=headers)
-
-    if response.status_code == 200:
-        await update.message.reply_text("دنگ با موفقیت ثبت شد✅")
-
+    status_code, response = result
+    description_of_expense = response["data"]["description"]
+    if status_code == 200:
+        await update.effective_message.reply_text("✅ دونگ با موفقیت ثبت شد.")
         try:
             await context.bot.send_message(
-                chat_id=user_id_selected_member,
-                text=f"🧾 دنگ شما به مبلغ {share} تومان در خرید با شناسه <code>{expense_id}</code> ثبت شد."
-                     f"برای کپی کردن روی شناسه کلیک کنید",
-                parse_mode="HTML"
+                chat_id=selected["user_id"],
+                text=f"🧾 دونگ شما به مبلغ {data['share']} تومان در خرید {description_of_expense} ثبت شد.",
             )
         except Exception as e:
-            print(f"❌ ارسال پیام به کاربر {user_id_selected_member} با خطا مواجه شد: {e}")
-
+            print(f"❌ ارسال پیام به کاربر ناموفق بود: {e}")
     else:
-        await update.message.reply_text(
-            f"❌ خطا در ثبت عضو: {response.json().get('detail', 'خطای نامشخص')}"
-        )
+        await update.effective_message.reply_text("❌ خطا در ثبت دنگ.")
 
     return ConversationHandler.END
+
+
+def get_add_member_expense_handler():
+    return ConversationHandler(
+        entry_points=[CommandHandler("add_member_expense", start_add_member_expense)],
+        states={
+            GROUP_ID: [CallbackQueryHandler(get_group_id)],  # ← تغییر اینجا
+            SELECT_MEMBER: [CallbackQueryHandler(member_selected)],
+            AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_amount)],
+            EXPENSE_ID: [CallbackQueryHandler(get_expense_id)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+    )
