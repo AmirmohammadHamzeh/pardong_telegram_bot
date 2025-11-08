@@ -53,7 +53,7 @@ async def get_groupid_add_member_group(update: Update, context: CallbackContext)
                 return ConversationHandler.END
             if status_code3 == 200:
                 group_name = response3["data"]["group_name"]
-                start_cache_group_id = add_to_user_dict(user_data["user_id"], group_name, group_id)
+                start_cache_group_id = cache_group_id.add_to_dict(user_data["user_id"], group_name, group_id)
                 if start_cache_group_id:
                     await update.message.reply_text(f"✅شما با موفقیت عضو گروه {group_name}شدی ")
                 else:

@@ -14,7 +14,7 @@ from textwrap import dedent
 
 API_REGISTER_USER = "/auth/register/"
 API_USER_INFO = "/auth/check-registration/"
-START, USERNAME_REGISTER_USER, PHONE_REGISTER_USER, CARD_REGISTER_USER = range(4)  # 👈 مرحله جدید اضافه شد
+START, USERNAME_REGISTER_USER, PHONE_REGISTER_USER, CARD_REGISTER_USER = range(4)
 cache_group_id = RedisManager(db=DB_NUM_CACHE_GROUP_ID)
 
 
@@ -120,7 +120,6 @@ def register_user_handler():
             USERNAME_REGISTER_USER: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_username_register_user)],
             PHONE_REGISTER_USER: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_phone_register_user)],
             CARD_REGISTER_USER: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_card_register_user)],
-            # 👈 مرحله جدید
         },
         fallbacks=[CommandHandler("cancel", cancel)],
     )
