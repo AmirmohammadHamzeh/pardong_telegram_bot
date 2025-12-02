@@ -1,13 +1,13 @@
-from config import TOKEN
-from expenses import expenses_handler
-from register_expense import register_expense_handler
-from register_group import register_group_handler
-from register_user import register_user_handler
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackQueryHandler
-from get_user_data import get_user_information
-from register_member_group import get_add_member_group_handler
-from register_member_expense import get_add_member_expense_handler
-from get_unpaid_expense import unpaid_expense_handler, handle_payment_review
+from config import TELEGRAM_BOT_TOKEN as TOKEN
+from handlers.expenses.expenses import expenses_handler
+from handlers.expenses.register_expense import register_expense_handler
+from handlers.groups.register_group import register_group_handler
+from handlers.users.register_user import register_user_handler
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler
+from handlers.users.get_user_data import get_user_information
+from handlers.groups.register_member_group import get_add_member_group_handler
+from handlers.expenses.register_member_expense import get_add_member_expense_handler
+from handlers.expenses.get_unpaid_expense import unpaid_expense_handler, handle_payment_review
 from warnings import filterwarnings
 from telegram.warnings import PTBUserWarning
 
